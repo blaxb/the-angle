@@ -3,6 +3,20 @@
   <h1 class="h1">Dashboard</h1>
   <p class="sub">Hot conversations, organized into categories.</p>
 
+  {% if featured_topics %}
+    <div class="featured">
+      <div class="featured-title">Important topics</div>
+      <div class="featured-grid">
+        {% for topic in featured_topics %}
+          <a class="featured-card" href="/dashboard?category={{ topic }}">
+            <div class="featured-name">{{ topic }}</div>
+            <div class="featured-meta">From your topics</div>
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
   <div class="grid">
     <div class="card">
       <b>Ingest</b>

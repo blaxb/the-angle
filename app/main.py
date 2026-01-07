@@ -372,6 +372,7 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
     for c in cats:
         counts[c] = counts.get(c, 0) + 1
     ranked = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    ranked_map = dict(ranked)
 
     conversation_map = {}
     conversation_rows = session.exec(
@@ -381,6 +382,23 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         conversation_map.setdefault(row.category, []).append(
             {"summary": row.summary, "url": row.post_url}
         )
+
+    # Summaries
+    categories = []
+    for k, v in ranked:
+        categories.append(
+            {
+                "name": k,
+                "count": v,
+                "conversations": conversation_map.get(k, []),
+            }
+        )
+    featured_topics = []
+    if user_topics:
+        featured_topics = sorted(
+            user_topics,
+            key=lambda topic: (-ranked_map.get(topic, 0), topic),
+        )[:6]
 
     # Summaries
     categories = []
@@ -406,6 +424,7 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
             "selected_category": category,
             "msg": request.query_params.get("msg"),
             "user_topics": user_topics,
+            "featured_topics": featured_topics,
         },
     )
 
@@ -442,30 +461,42 @@ async def ingest_all(
     with session.no_autoflush:
         # Reddit
         for topic in topic_list:
-            posts = await fetch_reddit_search(topic, sort="hot", limit=25, conversations_only=True)
-            for p in posts:
-                existing = session.exec(
-                    select(Post).where(Post.source == "reddit", Post.source_id == p["source_id"])
-                ).first()
-                if existing:
-                    continue
-
-                cat = topic.lower()
-                session.add(
-                    Post(
-                        source="reddit",
-                        source_id=p["source_id"],
-                        category=cat,
-                        title=p["title"],
-                        url=p["url"],
-                        author=p.get("author"),
-                        created_utc=p["created_utc"],
-                        score=p["score"],
-                        num_comments=p["num_comments"],
-                        heat_score=compute_heat(p["score"], p["num_comments"], p["created_utc"]),
-                    )
+            seen_ids = set()
+            for sort in ("hot", "new", "top"):
+                posts = await fetch_reddit_search(
+                    topic,
+                    sort=sort,
+                    limit=50,
+                    conversations_only=True,
                 )
-                inserted_reddit += 1
+                for p in posts:
+                    source_id = p["source_id"]
+                    if source_id in seen_ids:
+                        continue
+                    seen_ids.add(source_id)
+
+                    existing = session.exec(
+                        select(Post).where(Post.source == "reddit", Post.source_id == source_id)
+                    ).first()
+                    if existing:
+                        continue
+
+                    cat = topic.lower()
+                    session.add(
+                        Post(
+                            source="reddit",
+                            source_id=source_id,
+                            category=cat,
+                            title=p["title"],
+                            url=p["url"],
+                            author=p.get("author"),
+                            created_utc=p["created_utc"],
+                            score=p["score"],
+                            num_comments=p["num_comments"],
+                            heat_score=compute_heat(p["score"], p["num_comments"], p["created_utc"]),
+                        )
+                    )
+                    inserted_reddit += 1
 
         # X (optional)
         if topic_list and settings.x_bearer_token:
