@@ -224,13 +224,6 @@ async def ingest_all(
     inserted_x = 0
     x_status = None
 
-    # Reset previous ingest results so categories match requested topics
-    session.exec(delete(CategorySummary))
-    session.exec(delete(Post))
-    session.commit()
-
-    x_category = topic_list[0].lower() if len(topic_list) == 1 else "mixed"
-
     # --- Ingest (avoid premature autoflush during big loops) ---
     with session.no_autoflush:
         # Reddit
@@ -277,7 +270,7 @@ async def ingest_all(
                     if existing:
                         continue
 
-                    cat = x_category
+                    cat = naive_category(p["title"])
                     session.add(
                         Post(
                             source="x",
