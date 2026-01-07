@@ -56,3 +56,79 @@ async def fetch_reddit(
 
     return out
 
+
+async def fetch_reddit_search(
+    query: str,
+    sort: str = "hot",
+    limit: int = 50,
+    conversations_only: bool = True,
+) -> List[Dict]:
+    """
+    Search Reddit posts globally by topic query.
+    """
+    url = "https://www.reddit.com/search.json"
+    headers = {"User-Agent": USER_AGENT}
+    params = {
+        "q": query,
+        "sort": sort,
+        "limit": limit,
+        "type": "link",
+    }
+
+    async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
+        r = await client.get(url, params=params)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+
+    out = []
+    for c in data.get("data", {}).get("children", []):
+        d = c.get("data", {})
+        if d.get("stickied"):
+            continue
+
+        title = d.get("title") or ""
+        is_self = bool(d.get("is_self"))
+
+        if conversations_only:
+            if not is_self and not looks_like_question(title):
+                continue
+
+        out.append({
+            "source": "reddit",
+            "source_id": d.get("id"),
+            "title": title,
+            "url": "https://www.reddit.com" + (d.get("permalink") or ""),
+            "author": d.get("author"),
+            "created_utc": int(d.get("created_utc") or 0),
+            "score": int(d.get("score") or 0),
+            "num_comments": int(d.get("num_comments") or 0),
+        })
+
+    return out
+
+
+async def fetch_reddit_comments(post_id: str, limit: int = 6) -> List[str]:
+    """
+    Fetch top comments for a Reddit post ID.
+    """
+    url = f"https://www.reddit.com/comments/{post_id}.json?limit={limit}"
+    headers = {"User-Agent": USER_AGENT}
+
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+        r = await client.get(url)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+
+    comments = []
+    if len(data) > 1:
+        for c in data[1].get("data", {}).get("children", []):
+            d = c.get("data", {})
+            body = (d.get("body") or "").strip()
+            if not body:
+                continue
+            comments.append(body)
+            if len(comments) >= limit:
+                break
+    return comments
