@@ -98,6 +98,7 @@ def register(
     session: Session = Depends(get_session),
 ):
     email = email.strip().lower()
+    password = password.strip()
     if session.exec(select(User).where(User.email == email)).first():
         return RedirectResponse("/register?err=exists", status_code=302)
 
@@ -126,6 +127,7 @@ def login(
     session: Session = Depends(get_session),
 ):
     email = email.strip().lower()
+    password = password.strip()
     u = session.exec(select(User).where(User.email == email)).first()
     if not u or not verify_password(password, u.password_hash):
         return RedirectResponse("/login?err=1", status_code=302)
@@ -324,4 +326,3 @@ def billing_success():
         "/dashboard?msg=Payment+received.+Webhook+activation+coming+next",
         status_code=302,
     )
-
