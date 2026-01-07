@@ -43,17 +43,10 @@
           <tr>
             <td><a href="/dashboard?category={{ c.name }}">{{ c.name }}</a><div class="small">hot topic</div></td>
             <td class="small">
-              {% if c.conversations %}
-                {% for convo in c.conversations %}
-                  <div style="margin-bottom:14px">
-                    <div>{{ convo.summary }}</div>
-                    <div style="margin-top:6px">
-                      <a class="btn ghost" href="{{ convo.url }}" target="_blank">See the conversation</a>
-                    </div>
-                  </div>
-                {% endfor %}
+              {% if c.top_post_url %}
+                <a href="{{ c.top_post_url }}" target="_blank">{{ c.summary or "—" }}</a>
               {% else %}
-                —
+                {{ c.summary or "—" }}
               {% endif %}
             </td>
           </tr>
