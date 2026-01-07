@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sqlmodel import Session, select
-from sqlalchemy import text
+from sqlalchemy import delete, text
 
 from .db import init_db, get_session, engine
 from .models import User, Post, CategorySummary
@@ -236,7 +236,7 @@ async def ingest_all(
                 if existing:
                     continue
 
-                cat = naive_category(p["title"])
+                cat = topic.lower()
                 session.add(
                     Post(
                         source="reddit",
