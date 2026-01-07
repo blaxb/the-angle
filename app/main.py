@@ -18,9 +18,10 @@ from .auth import (
     verify_password,
     make_session_token,
     COOKIE_NAME,
+    MAX_AGE_SECONDS,
     get_current_user,
 )
-from .ingest_reddit import fetch_reddit
+from .ingest_reddit import fetch_reddit_search
 from .ingest_x import fetch_x_recent
 from .summarizer import summarize_category
 from .stripe_billing import create_checkout_session
@@ -72,6 +73,10 @@ def render(request: Request, name: str, ctx: dict):
     return templates.TemplateResponse(name, ctx)
 
 
+def is_secure_request(request: Request) -> bool:
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+
+
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request, session: Session = Depends(get_session)):
     user = get_current_user(request, session)
@@ -94,6 +99,7 @@ def register_page(request: Request, session: Session = Depends(get_session)):
 
 @app.post("/register")
 def register(
+    request: Request,
     email: str = Form(...),
     password: str = Form(...),
     session: Session = Depends(get_session),
@@ -109,7 +115,15 @@ def register(
     session.refresh(u)
 
     resp = RedirectResponse("/dashboard", status_code=302)
-    resp.set_cookie(COOKIE_NAME, make_session_token(u.id), httponly=True, samesite="lax")
+    resp.set_cookie(
+        COOKIE_NAME,
+        make_session_token(u.id),
+        httponly=True,
+        samesite="lax",
+        secure=is_secure_request(request),
+        max_age=MAX_AGE_SECONDS,
+        path="/",
+    )
     return resp
 
 
@@ -123,6 +137,7 @@ def login_page(request: Request, session: Session = Depends(get_session)):
 
 @app.post("/login")
 def login(
+    request: Request,
     email: str = Form(...),
     password: str = Form(...),
     session: Session = Depends(get_session),
@@ -134,14 +149,22 @@ def login(
         return RedirectResponse("/login?err=1", status_code=302)
 
     resp = RedirectResponse("/dashboard", status_code=302)
-    resp.set_cookie(COOKIE_NAME, make_session_token(u.id), httponly=True, samesite="lax")
+    resp.set_cookie(
+        COOKIE_NAME,
+        make_session_token(u.id),
+        httponly=True,
+        samesite="lax",
+        secure=is_secure_request(request),
+        max_age=MAX_AGE_SECONDS,
+        path="/",
+    )
     return resp
 
 
 @app.get("/logout")
-def logout():
+def logout(request: Request):
     resp = RedirectResponse("/pricing", status_code=302)
-    resp.delete_cookie(COOKIE_NAME)
+    resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
 
 
@@ -184,8 +207,7 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
 @app.post("/ingest/all")
 async def ingest_all(
     request: Request,
-    subreddits: str = Form(...),
-    x_query: str = Form(""),
+    topics: str = Form(...),
     session: Session = Depends(get_session),
 ):
     """
@@ -195,7 +217,9 @@ async def ingest_all(
     if not user:
         return RedirectResponse("/login", status_code=302)
 
-    subs = [s.strip() for s in subreddits.split(",") if s.strip()]
+    topic_list = [topic.strip() for topic in topics.split(",") if topic.strip()]
+    if not topic_list:
+        return RedirectResponse("/dashboard?msg=Add+at+least+one+topic", status_code=302)
     inserted_reddit = 0
     inserted_x = 0
     x_status = None
@@ -203,8 +227,8 @@ async def ingest_all(
     # --- Ingest (avoid premature autoflush during big loops) ---
     with session.no_autoflush:
         # Reddit
-        for sr in subs:
-            posts = await fetch_reddit(sr, sort="hot", limit=40, conversations_only=True)
+        for topic in topic_list:
+            posts = await fetch_reddit_search(topic, sort="hot", limit=25, conversations_only=True)
             for p in posts:
                 existing = session.exec(
                     select(Post).where(Post.source == "reddit", Post.source_id == p["source_id"])
@@ -230,8 +254,9 @@ async def ingest_all(
                 inserted_reddit += 1
 
         # X (optional)
-        if x_query.strip() and settings.x_bearer_token:
+        if topic_list and settings.x_bearer_token:
             try:
+                x_query = " OR ".join(topic_list)
                 raw = await fetch_x_recent(
                     query=x_query.strip(),
                     bearer_token=settings.x_bearer_token,
