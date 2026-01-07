@@ -4,11 +4,7 @@ from pydantic_settings import BaseSettings
 def resolve_db_url() -> str:
     explicit_path = os.getenv("THEANGLE_DB_PATH") or os.getenv("RENDER_DISK_PATH")
     if explicit_path:
-        if explicit_path.endswith(".db"):
-            return f"sqlite:///{explicit_path}"
         return f"sqlite:///{explicit_path.rstrip('/')}/theangle.db"
-    if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("RENDER_INSTANCE_ID"):
-        return "sqlite:////var/data/theangle.db"
     if os.path.isdir("/var/data"):
         return "sqlite:////var/data/theangle.db"
     return "sqlite:///./theangle.db"
