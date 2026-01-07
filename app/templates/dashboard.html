@@ -16,20 +16,14 @@
       <b>Ingest</b>
       <p class="small">Start with Reddit. X is enabled once you upgrade and add your token.</p>
 
-      <form method="post" action="/ingest/reddit">
+      <form method="post" action="/ingest/all">
         <label class="small">Subreddits (comma separated)</label>
         <input class="input" name="subreddits" value="food,Cooking,nutrition,EatCheapAndHealthy,recipes" />
         <div style="height:10px"></div>
-        <button class="btn" type="submit">Ingest Reddit</button>
-      </form>
-
-  <div style="height:14px"></div>
-
-      <form method="post" action="/ingest/x">
         <label class="small">X query (requires X_BEARER_TOKEN)</label>
-        <input class="input" name="query" value="food OR nutrition OR recipes" />
+        <input class="input" name="x_query" value="food OR nutrition OR recipes" />
         <div style="height:10px"></div>
-        <button class="btn" type="submit">Ingest X</button>
+        <button class="btn" type="submit">Ingest</button>
       </form>
 
       <div style="height:14px"></div>
@@ -71,4 +65,3 @@
     </div>
   </div>
 {% endblock %}
-
