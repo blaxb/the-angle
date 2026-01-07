@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from sqlalchemy import delete, text
 
 from .db import init_db, get_session, engine
-from .models import User, Post, CategorySummary
+from .models import User, Post, CategorySummary, ConversationSummary
 from .auth import (
     hash_password,
     verify_password,
@@ -24,13 +24,15 @@ from .auth import (
 )
 from .ingest_reddit import fetch_reddit_search
 from .ingest_x import fetch_x_recent
-from .summarizer import summarize_category
+from .summarizer import summarize_category, summarize_post
 from .stripe_billing import create_checkout_session
 from .settings import settings
 
 app = FastAPI(title="The Angle")
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+LAST_TOPICS_COOKIE = "last_topics"
 
 
 def compute_heat(score: int, comments: int, created_utc: int) -> float:
@@ -188,6 +190,16 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
     if category:
         categories = [c for c in categories if c["name"] == category]
 
+    # Summaries
+    categories = []
+    for k, v in ranked:
+        categories.append(
+            {
+                "name": k,
+                "count": v,
+                "conversations": conversation_map.get(k, []),
+            }
+        )
     if category:
         categories = [c for c in categories if c["name"] == category]
 
