@@ -400,6 +400,16 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
             key=lambda topic: (-ranked_map.get(topic, 0), topic),
         )[:6]
 
+    # Summaries
+    categories = []
+    for k, v in ranked:
+        categories.append(
+            {
+                "name": k,
+                "count": v,
+                "conversations": conversation_map.get(k, []),
+            }
+        )
     if category:
         categories = [c for c in categories if c["name"] == category]
     elif user_topics:
