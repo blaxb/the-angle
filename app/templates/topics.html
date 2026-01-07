@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1 class="h1">Choose your topics</h1>
+  <p class="sub">Pick the areas you care about to personalize your dashboard.</p>
+
+  <div class="card">
+    <form method="post" action="/topics">
+      <div class="topic-grid">
+        {% for topic in topics %}
+          <label class="topic-pill">
+            <input
+              class="topic-input"
+              type="checkbox"
+              name="topics"
+              value="{{ topic }}"
+              {% if topic in selected_topics %}checked{% endif %}
+            />
+            <span>{{ topic }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div style="height:16px"></div>
+      <button class="btn" type="submit">Save topics</button>
+    </form>
+  </div>
+{% endblock %}
