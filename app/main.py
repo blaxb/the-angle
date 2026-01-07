@@ -2,6 +2,7 @@
 import time
 from datetime import datetime
 
+import httpx
 from fastapi import FastAPI, Request, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -197,6 +198,7 @@ async def ingest_all(
     subs = [s.strip() for s in subreddits.split(",") if s.strip()]
     inserted_reddit = 0
     inserted_x = 0
+    x_status = None
 
     # --- Ingest (avoid premature autoflush during big loops) ---
     with session.no_autoflush:
@@ -229,35 +231,40 @@ async def ingest_all(
 
         # X (optional)
         if x_query.strip() and settings.x_bearer_token:
-            raw = await fetch_x_recent(
-                query=x_query.strip(),
-                bearer_token=settings.x_bearer_token,
-                max_results=25,
-            )
-            now = int(time.time())
-            for p in raw:
-                existing = session.exec(
-                    select(Post).where(Post.source == "x", Post.source_id == p["source_id"])
-                ).first()
-                if existing:
-                    continue
-
-                cat = naive_category(p["title"])
-                session.add(
-                    Post(
-                        source="x",
-                        source_id=p["source_id"],
-                        category=cat,
-                        title=p["title"],
-                        url=p["url"],
-                        author=p.get("author"),
-                        created_utc=now,
-                        score=p["score"],
-                        num_comments=p["num_comments"],
-                        heat_score=compute_heat(p["score"], p["num_comments"], now),
-                    )
+            try:
+                raw = await fetch_x_recent(
+                    query=x_query.strip(),
+                    bearer_token=settings.x_bearer_token,
+                    max_results=25,
                 )
-                inserted_x += 1
+                now = int(time.time())
+                for p in raw:
+                    existing = session.exec(
+                        select(Post).where(Post.source == "x", Post.source_id == p["source_id"])
+                    ).first()
+                    if existing:
+                        continue
+
+                    cat = naive_category(p["title"])
+                    session.add(
+                        Post(
+                            source="x",
+                            source_id=p["source_id"],
+                            category=cat,
+                            title=p["title"],
+                            url=p["url"],
+                            author=p.get("author"),
+                            created_utc=now,
+                            score=p["score"],
+                            num_comments=p["num_comments"],
+                            heat_score=compute_heat(p["score"], p["num_comments"], now),
+                        )
+                    )
+                    inserted_x += 1
+            except httpx.HTTPStatusError as exc:
+                x_status = f"X skipped ({exc.response.status_code})"
+            except httpx.RequestError:
+                x_status = "X skipped (network error)"
 
     # Commit inserts first
     session.commit()
@@ -296,7 +303,13 @@ async def ingest_all(
         # Don’t break ingestion if OpenAI isn’t configured yet
         summary_status = "Summaries skipped (check OPENAI_API_KEY)"
 
-    msg = f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • {summary_status}"
+    if x_status:
+        msg = (
+            f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • "
+            f"{summary_status} • {x_status}"
+        )
+    else:
+        msg = f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • {summary_status}"
     return RedirectResponse(f"/dashboard?msg={msg.replace(' ', '+')}", status_code=302)
 
 
