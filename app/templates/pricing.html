@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1 class="h1">API Tiers & Pricing</h1>
+  <p class="sub">Simple pricing. Cancel anytime.</p>
+
+  <div class="card" style="max-width:540px">
+    <div class="small">Free</div>
+    <div style="font-size:54px; font-weight:700; margin-top:6px">$0 <span class="small">/month</span></div>
+    <p class="small">For testing.</p>
+    <hr style="border:none;border-top:1px solid var(--line); margin:16px 0" />
+    <div class="small"><b>What’s included:</b></div>
+    <ul>
+      <li>1 project</li>
+      <li>Basic feed access</li>
+      <li>Limited ingestion</li>
+    </ul>
+
+    {% if user %}
+      {% if user.is_active_subscriber %}
+        <div class="small" style="margin-top:10px"><b>Status:</b> Active subscriber ✅</div>
+      {% else %}
+        <a class="btn" href="/billing/checkout">Upgrade to Pro</a>
+      {% endif %}
+    {% else %}
+      <a class="btn" href="/register">Create account</a>
+    {% endif %}
+  </div>
+{% endblock %}
+
