@@ -184,14 +184,11 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         counts[c] = counts.get(c, 0) + 1
     ranked = sorted(counts.items(), key=lambda x: x[1], reverse=True)
 
-    conversation_rows = session.exec(
-        select(ConversationSummary).order_by(ConversationSummary.position)
-    ).all()
-    conversation_map = {}
-    for row in conversation_rows:
-        conversation_map.setdefault(row.category, []).append(
-            {"summary": row.summary, "url": row.post_url}
-        )
+    # Summaries
+    summaries = {s.category: s.summary for s in session.exec(select(CategorySummary)).all()}
+    categories = [{"name": k, "count": v, "summary": summaries.get(k)} for k, v in ranked]
+    if category:
+        categories = [c for c in categories if c["name"] == category]
 
     # Summaries
     categories = []
@@ -205,11 +202,6 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         )
     if category:
         categories = [c for c in categories if c["name"] == category]
-    else:
-        cookie_topics = request.cookies.get(LAST_TOPICS_COOKIE, "")
-        requested = [t.strip() for t in cookie_topics.split(",") if t.strip()]
-        if requested:
-            categories = [c for c in categories if c["name"] in requested]
 
     return render(
         request,
@@ -242,14 +234,6 @@ async def ingest_all(
     inserted_reddit = 0
     inserted_x = 0
     x_status = None
-
-    # Reset previous ingest results so categories match requested topics
-    session.exec(delete(CategorySummary))
-    session.exec(delete(ConversationSummary))
-    session.exec(delete(Post))
-    session.commit()
-
-    x_category = topic_list[0].lower() if len(topic_list) == 1 else "mixed"
 
     # --- Ingest (avoid premature autoflush during big loops) ---
     with session.no_autoflush:
@@ -297,7 +281,7 @@ async def ingest_all(
                     if existing:
                         continue
 
-                    cat = x_category
+                    cat = naive_category(p["title"])
                     session.add(
                         Post(
                             source="x",
@@ -355,28 +339,6 @@ async def ingest_all(
         # Don’t break ingestion if OpenAI isn’t configured yet
         summary_status = "Summaries skipped (check OPENAI_API_KEY)"
 
-    # --- Conversation summaries ---
-    categories = session.exec(select(Post.category)).all()
-    unique = sorted(set([c for c in categories if c]))
-    for cat in unique:
-        top_posts = session.exec(
-            select(Post)
-            .where(Post.category == cat, Post.source == "reddit")
-            .order_by(Post.heat_score.desc())
-            .limit(6)
-        ).all()
-        for idx, post in enumerate(top_posts):
-            summary = summarize_post(post.title)
-            session.add(
-                ConversationSummary(
-                    category=cat,
-                    post_url=post.url,
-                    summary=summary,
-                    position=idx,
-                )
-            )
-    session.commit()
-
     if x_status:
         msg = (
             f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • "
@@ -384,21 +346,7 @@ async def ingest_all(
         )
     else:
         msg = f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • {summary_status}"
-    msg_param = quote_plus(msg)
-    redirect_url = f"/dashboard?msg={msg_param}"
-    if len(topic_list) == 1:
-        redirect_url += f"&category={quote_plus(topic_list[0].lower())}"
-    resp = RedirectResponse(redirect_url, status_code=302)
-    resp.set_cookie(
-        LAST_TOPICS_COOKIE,
-        ",".join([t.lower() for t in topic_list]),
-        httponly=True,
-        samesite="lax",
-        secure=is_secure_request(request),
-        max_age=MAX_AGE_SECONDS,
-        path="/",
-    )
-    return resp
+    return RedirectResponse(f"/dashboard?msg={msg.replace(' ', '+')}", status_code=302)
 
 
 @app.get("/billing/checkout")
