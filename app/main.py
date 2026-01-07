@@ -33,7 +33,7 @@ templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 LAST_TOPICS_COOKIE = "last_topics"
-MAX_CONVERSATIONS_PER_TOPIC = 8
+MAX_CONVERSATIONS_PER_TOPIC = 15
 TOPIC_CHOICES = [
     "ai",
     "art",
@@ -401,6 +401,16 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
             key=lambda topic: (-ranked_map.get(topic, 0), topic),
         )[:6]
 
+    # Summaries
+    categories = []
+    for k, v in ranked:
+        categories.append(
+            {
+                "name": k,
+                "count": v,
+                "conversations": conversation_map.get(k, []),
+            }
+        )
     if category:
         categories = [c for c in categories if c["name"] == category]
     elif user_topics:
