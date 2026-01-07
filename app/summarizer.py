@@ -28,17 +28,22 @@ Titles:
     return resp.choices[0].message.content.strip()
 
 
-def summarize_post(title: str) -> str:
+def summarize_post(title: str, comments: list[str] | None = None) -> str:
     if not client:
         return title
 
+    comment_block = ""
+    if comments:
+        comment_block = "\n\nTop comments:\n" + "\n".join([f"- {c}" for c in comments[:6]])
+
     prompt = f"""
-You are summarizing a single Reddit post title for a dashboard list.
-Rewrite the title as a concise, plain-language summary in one sentence (max 18 words).
+You are summarizing a Reddit conversation for a dashboard list.
+Use the title and comments to create a concise, plain-language summary in one sentence (max 18 words).
 Avoid quotes, numbering, and hashtags.
 
 Title:
 {title}
+{comment_block}
 """.strip()
 
     resp = client.chat.completions.create(

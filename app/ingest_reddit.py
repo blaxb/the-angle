@@ -106,3 +106,29 @@ async def fetch_reddit_search(
         })
 
     return out
+
+
+async def fetch_reddit_comments(post_id: str, limit: int = 6) -> List[str]:
+    """
+    Fetch top comments for a Reddit post ID.
+    """
+    url = f"https://www.reddit.com/comments/{post_id}.json?limit={limit}"
+    headers = {"User-Agent": USER_AGENT}
+
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+        r = await client.get(url)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+
+    comments = []
+    if len(data) > 1:
+        for c in data[1].get("data", {}).get("children", []):
+            d = c.get("data", {})
+            body = (d.get("body") or "").strip()
+            if not body:
+                continue
+            comments.append(body)
+            if len(comments) >= limit:
+                break
+    return comments

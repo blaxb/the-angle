@@ -22,7 +22,7 @@ from .auth import (
     MAX_AGE_SECONDS,
     get_current_user,
 )
-from .ingest_reddit import fetch_reddit_search
+from .ingest_reddit import fetch_reddit_search, fetch_reddit_comments
 from .ingest_x import fetch_x_recent
 from .summarizer import summarize_category, summarize_post
 from .stripe_billing import create_checkout_session
@@ -33,6 +33,7 @@ templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 LAST_TOPICS_COOKIE = "last_topics"
+MAX_CONVERSATIONS_PER_TOPIC = 15
 TOPIC_CHOICES = [
     "ai",
     "art",
@@ -581,10 +582,11 @@ async def ingest_all(
             select(Post)
             .where(Post.category == cat, Post.source == "reddit")
             .order_by(Post.heat_score.desc())
-            .limit(6)
+            .limit(MAX_CONVERSATIONS_PER_TOPIC)
         ).all()
         for idx, post in enumerate(top_posts):
-            summary = summarize_post(post.title)
+            comments = await fetch_reddit_comments(post.source_id, limit=6)
+            summary = summarize_post(post.title, comments)
             session.add(
                 ConversationSummary(
                     category=cat,

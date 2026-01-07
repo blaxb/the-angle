@@ -1,11 +1,15 @@
 import os
 from pydantic_settings import BaseSettings
 
-DEFAULT_DB_URL = (
-    "sqlite:////var/data/theangle.db"
-    if os.path.isdir("/var/data")
-    else "sqlite:///./theangle.db"
-)
+def resolve_db_url() -> str:
+    explicit_path = os.getenv("THEANGLE_DB_PATH") or os.getenv("RENDER_DISK_PATH")
+    if explicit_path:
+        return f"sqlite:///{explicit_path.rstrip('/')}/theangle.db"
+    if os.path.isdir("/var/data"):
+        return "sqlite:////var/data/theangle.db"
+    return "sqlite:///./theangle.db"
+
+DEFAULT_DB_URL = resolve_db_url()
 
 class Settings(BaseSettings):
     app_secret: str
