@@ -63,3 +63,25 @@ body{
 .small{color:var(--muted); font-size:14px}
 .footer{border-top:1px solid var(--line); color:var(--muted)}
 
+.topic-grid{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.topic-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:#fff;
+  color:var(--ink);
+  text-decoration:none;
+  font-size:14px;
+  cursor:pointer;
+}
+.topic-pill:hover{border-color:#bdbdbd}
+.topic-input{
+  accent-color: var(--ink);
+}
