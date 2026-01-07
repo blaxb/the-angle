@@ -189,10 +189,7 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         categories = [c for c in categories if c["name"] == category]
 
     if category:
-        q = select(Post).where(Post.category == category).order_by(Post.heat_score.desc()).limit(40)
-    else:
-        q = select(Post).order_by(Post.heat_score.desc()).limit(40)
-    posts = list(session.exec(q).all())
+        categories = [c for c in categories if c["name"] == category]
 
     return render(
         request,
@@ -200,7 +197,6 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         {
             "user": user,
             "categories": categories[:40],
-            "posts": posts,
             "selected_category": category,
             "msg": request.query_params.get("msg"),
         },
