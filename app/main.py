@@ -1,33 +1,38 @@
 # app/main.py
 import time
+from urllib.parse import quote_plus
 from datetime import datetime
 
+import httpx
 from fastapi import FastAPI, Request, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sqlmodel import Session, select
-from sqlalchemy import text
+from sqlalchemy import delete, text
 
 from .db import init_db, get_session, engine
-from .models import User, Post, CategorySummary
+from .models import User, Post, CategorySummary, ConversationSummary
 from .auth import (
     hash_password,
     verify_password,
     make_session_token,
     COOKIE_NAME,
+    MAX_AGE_SECONDS,
     get_current_user,
 )
-from .ingest_reddit import fetch_reddit
+from .ingest_reddit import fetch_reddit_search
 from .ingest_x import fetch_x_recent
-from .summarizer import summarize_category
+from .summarizer import summarize_category, summarize_post
 from .stripe_billing import create_checkout_session
 from .settings import settings
 
 app = FastAPI(title="The Angle")
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+LAST_TOPICS_COOKIE = "last_topics"
 
 
 def compute_heat(score: int, comments: int, created_utc: int) -> float:
@@ -71,6 +76,10 @@ def render(request: Request, name: str, ctx: dict):
     return templates.TemplateResponse(name, ctx)
 
 
+def is_secure_request(request: Request) -> bool:
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+
+
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request, session: Session = Depends(get_session)):
     user = get_current_user(request, session)
@@ -93,11 +102,13 @@ def register_page(request: Request, session: Session = Depends(get_session)):
 
 @app.post("/register")
 def register(
+    request: Request,
     email: str = Form(...),
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
     email = email.strip().lower()
+    password = password.strip()
     if session.exec(select(User).where(User.email == email)).first():
         return RedirectResponse("/register?err=exists", status_code=302)
 
@@ -107,7 +118,15 @@ def register(
     session.refresh(u)
 
     resp = RedirectResponse("/dashboard", status_code=302)
-    resp.set_cookie(COOKIE_NAME, make_session_token(u.id), httponly=True, samesite="lax")
+    resp.set_cookie(
+        COOKIE_NAME,
+        make_session_token(u.id),
+        httponly=True,
+        samesite="lax",
+        secure=is_secure_request(request),
+        max_age=MAX_AGE_SECONDS,
+        path="/",
+    )
     return resp
 
 
@@ -121,24 +140,34 @@ def login_page(request: Request, session: Session = Depends(get_session)):
 
 @app.post("/login")
 def login(
+    request: Request,
     email: str = Form(...),
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
     email = email.strip().lower()
+    password = password.strip()
     u = session.exec(select(User).where(User.email == email)).first()
     if not u or not verify_password(password, u.password_hash):
         return RedirectResponse("/login?err=1", status_code=302)
 
     resp = RedirectResponse("/dashboard", status_code=302)
-    resp.set_cookie(COOKIE_NAME, make_session_token(u.id), httponly=True, samesite="lax")
+    resp.set_cookie(
+        COOKIE_NAME,
+        make_session_token(u.id),
+        httponly=True,
+        samesite="lax",
+        secure=is_secure_request(request),
+        max_age=MAX_AGE_SECONDS,
+        path="/",
+    )
     return resp
 
 
 @app.get("/logout")
-def logout():
+def logout(request: Request):
     resp = RedirectResponse("/pricing", status_code=302)
-    resp.delete_cookie(COOKIE_NAME)
+    resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
 
 
@@ -155,15 +184,32 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         counts[c] = counts.get(c, 0) + 1
     ranked = sorted(counts.items(), key=lambda x: x[1], reverse=True)
 
-    # Summaries
-    summaries = {s.category: s.summary for s in session.exec(select(CategorySummary)).all()}
-    categories = [{"name": k, "count": v, "summary": summaries.get(k)} for k, v in ranked]
+    conversation_rows = session.exec(
+        select(ConversationSummary).order_by(ConversationSummary.position)
+    ).all()
+    conversation_map = {}
+    for row in conversation_rows:
+        conversation_map.setdefault(row.category, []).append(
+            {"summary": row.summary, "url": row.post_url}
+        )
 
+    # Summaries
+    categories = []
+    for k, v in ranked:
+        categories.append(
+            {
+                "name": k,
+                "count": v,
+                "conversations": conversation_map.get(k, []),
+            }
+        )
     if category:
-        q = select(Post).where(Post.category == category).order_by(Post.heat_score.desc()).limit(40)
+        categories = [c for c in categories if c["name"] == category]
     else:
-        q = select(Post).order_by(Post.heat_score.desc()).limit(40)
-    posts = list(session.exec(q).all())
+        cookie_topics = request.cookies.get(LAST_TOPICS_COOKIE, "")
+        requested = [t.strip() for t in cookie_topics.split(",") if t.strip()]
+        if requested:
+            categories = [c for c in categories if c["name"] in requested]
 
     return render(
         request,
@@ -171,7 +217,6 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         {
             "user": user,
             "categories": categories[:40],
-            "posts": posts,
             "selected_category": category,
             "msg": request.query_params.get("msg"),
         },
@@ -181,8 +226,7 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
 @app.post("/ingest/all")
 async def ingest_all(
     request: Request,
-    subreddits: str = Form(...),
-    x_query: str = Form(""),
+    topics: str = Form(...),
     session: Session = Depends(get_session),
 ):
     """
@@ -192,15 +236,26 @@ async def ingest_all(
     if not user:
         return RedirectResponse("/login", status_code=302)
 
-    subs = [s.strip() for s in subreddits.split(",") if s.strip()]
+    topic_list = [topic.strip() for topic in topics.split(",") if topic.strip()]
+    if not topic_list:
+        return RedirectResponse("/dashboard?msg=Add+at+least+one+topic", status_code=302)
     inserted_reddit = 0
     inserted_x = 0
+    x_status = None
+
+    # Reset previous ingest results so categories match requested topics
+    session.exec(delete(CategorySummary))
+    session.exec(delete(ConversationSummary))
+    session.exec(delete(Post))
+    session.commit()
+
+    x_category = topic_list[0].lower() if len(topic_list) == 1 else "mixed"
 
     # --- Ingest (avoid premature autoflush during big loops) ---
     with session.no_autoflush:
         # Reddit
-        for sr in subs:
-            posts = await fetch_reddit(sr, sort="hot", limit=40, conversations_only=True)
+        for topic in topic_list:
+            posts = await fetch_reddit_search(topic, sort="hot", limit=25, conversations_only=True)
             for p in posts:
                 existing = session.exec(
                     select(Post).where(Post.source == "reddit", Post.source_id == p["source_id"])
@@ -208,7 +263,7 @@ async def ingest_all(
                 if existing:
                     continue
 
-                cat = naive_category(p["title"])
+                cat = topic.lower()
                 session.add(
                     Post(
                         source="reddit",
@@ -226,36 +281,42 @@ async def ingest_all(
                 inserted_reddit += 1
 
         # X (optional)
-        if x_query.strip() and settings.x_bearer_token:
-            raw = await fetch_x_recent(
-                query=x_query.strip(),
-                bearer_token=settings.x_bearer_token,
-                max_results=25,
-            )
-            now = int(time.time())
-            for p in raw:
-                existing = session.exec(
-                    select(Post).where(Post.source == "x", Post.source_id == p["source_id"])
-                ).first()
-                if existing:
-                    continue
-
-                cat = naive_category(p["title"])
-                session.add(
-                    Post(
-                        source="x",
-                        source_id=p["source_id"],
-                        category=cat,
-                        title=p["title"],
-                        url=p["url"],
-                        author=p.get("author"),
-                        created_utc=now,
-                        score=p["score"],
-                        num_comments=p["num_comments"],
-                        heat_score=compute_heat(p["score"], p["num_comments"], now),
-                    )
+        if topic_list and settings.x_bearer_token:
+            try:
+                x_query = " OR ".join(topic_list)
+                raw = await fetch_x_recent(
+                    query=x_query.strip(),
+                    bearer_token=settings.x_bearer_token,
+                    max_results=25,
                 )
-                inserted_x += 1
+                now = int(time.time())
+                for p in raw:
+                    existing = session.exec(
+                        select(Post).where(Post.source == "x", Post.source_id == p["source_id"])
+                    ).first()
+                    if existing:
+                        continue
+
+                    cat = x_category
+                    session.add(
+                        Post(
+                            source="x",
+                            source_id=p["source_id"],
+                            category=cat,
+                            title=p["title"],
+                            url=p["url"],
+                            author=p.get("author"),
+                            created_utc=now,
+                            score=p["score"],
+                            num_comments=p["num_comments"],
+                            heat_score=compute_heat(p["score"], p["num_comments"], now),
+                        )
+                    )
+                    inserted_x += 1
+            except httpx.HTTPStatusError as exc:
+                x_status = f"X skipped ({exc.response.status_code})"
+            except httpx.RequestError:
+                x_status = "X skipped (network error)"
 
     # Commit inserts first
     session.commit()
@@ -294,8 +355,50 @@ async def ingest_all(
         # Don’t break ingestion if OpenAI isn’t configured yet
         summary_status = "Summaries skipped (check OPENAI_API_KEY)"
 
-    msg = f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • {summary_status}"
-    return RedirectResponse(f"/dashboard?msg={msg.replace(' ', '+')}", status_code=302)
+    # --- Conversation summaries ---
+    categories = session.exec(select(Post.category)).all()
+    unique = sorted(set([c for c in categories if c]))
+    for cat in unique:
+        top_posts = session.exec(
+            select(Post)
+            .where(Post.category == cat, Post.source == "reddit")
+            .order_by(Post.heat_score.desc())
+            .limit(6)
+        ).all()
+        for idx, post in enumerate(top_posts):
+            summary = summarize_post(post.title)
+            session.add(
+                ConversationSummary(
+                    category=cat,
+                    post_url=post.url,
+                    summary=summary,
+                    position=idx,
+                )
+            )
+    session.commit()
+
+    if x_status:
+        msg = (
+            f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • "
+            f"{summary_status} • {x_status}"
+        )
+    else:
+        msg = f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • {summary_status}"
+    msg_param = quote_plus(msg)
+    redirect_url = f"/dashboard?msg={msg_param}"
+    if len(topic_list) == 1:
+        redirect_url += f"&category={quote_plus(topic_list[0].lower())}"
+    resp = RedirectResponse(redirect_url, status_code=302)
+    resp.set_cookie(
+        LAST_TOPICS_COOKIE,
+        ",".join([t.lower() for t in topic_list]),
+        httponly=True,
+        samesite="lax",
+        secure=is_secure_request(request),
+        max_age=MAX_AGE_SECONDS,
+        path="/",
+    )
+    return resp
 
 
 @app.get("/billing/checkout")
@@ -324,4 +427,3 @@ def billing_success():
         "/dashboard?msg=Payment+received.+Webhook+activation+coming+next",
         status_code=302,
     )
-
