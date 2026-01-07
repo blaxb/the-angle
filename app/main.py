@@ -227,13 +227,6 @@ async def ingest_all(
     inserted_x = 0
     x_status = None
 
-    # Reset previous ingest results so categories match requested topics
-    session.exec(delete(CategorySummary))
-    session.exec(delete(Post))
-    session.commit()
-
-    x_category = topic_list[0].lower() if len(topic_list) == 1 else "mixed"
-
     # --- Ingest (avoid premature autoflush during big loops) ---
     with session.no_autoflush:
         # Reddit
@@ -280,7 +273,7 @@ async def ingest_all(
                     if existing:
                         continue
 
-                    cat = x_category
+                    cat = naive_category(p["title"])
                     session.add(
                         Post(
                             source="x",
@@ -345,11 +338,7 @@ async def ingest_all(
         )
     else:
         msg = f"Ingested {inserted_reddit} Reddit + {inserted_x} X posts • {summary_status}"
-    msg_param = quote_plus(msg)
-    redirect_url = f"/dashboard?msg={msg_param}"
-    if len(topic_list) == 1:
-        redirect_url += f"&category={quote_plus(topic_list[0].lower())}"
-    return RedirectResponse(redirect_url, status_code=302)
+    return RedirectResponse(f"/dashboard?msg={msg.replace(' ', '+')}", status_code=302)
 
 
 @app.get("/billing/checkout")
