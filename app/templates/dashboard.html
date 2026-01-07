@@ -3,41 +3,30 @@
   <h1 class="h1">Dashboard</h1>
   <p class="sub">Hot conversations, organized into categories.</p>
 
-  {% if not user.is_active_subscriber %}
-    <div class="card" style="margin-bottom:16px">
-      <b>Upgrade to unlock:</b> X ingestion, AI summaries, and higher limits.
-      <div style="height:10px"></div>
-      <a class="btn" href="/billing/checkout">Upgrade</a>
+  {% if featured_topics %}
+    <div class="featured">
+      <div class="featured-title">Important topics</div>
+      <div class="featured-grid">
+        {% for topic in featured_topics %}
+          <a class="featured-card" href="/dashboard?category={{ topic }}">
+            <div class="featured-name">{{ topic }}</div>
+            <div class="featured-meta">From your topics</div>
+          </a>
+        {% endfor %}
+      </div>
     </div>
   {% endif %}
 
   <div class="grid">
     <div class="card">
       <b>Ingest</b>
-      <p class="small">Start with Reddit. X is enabled once you upgrade and add your token.</p>
+      <p class="small">Enter topics once to ingest from Reddit + X (X requires token).</p>
 
-      <form method="post" action="/ingest/reddit">
-        <label class="small">Subreddits (comma separated)</label>
-        <input class="input" name="subreddits" value="food,Cooking,nutrition,EatCheapAndHealthy,recipes" />
+      <form method="post" action="/ingest/all">
+        <label class="small">Topics (comma separated)</label>
+        <input class="input" name="topics" placeholder="finance, politics, cooking" />
         <div style="height:10px"></div>
-        <button class="btn" type="submit">Ingest Reddit</button>
-      </form>
-
-  <div style="height:14px"></div>
-
-      <form method="post" action="/ingest/x">
-        <label class="small">X query (requires X_BEARER_TOKEN)</label>
-        <input class="input" name="query" value="food OR nutrition OR recipes" />
-        <div style="height:10px"></div>
-        <button class="btn" type="submit">Ingest X</button>
-      </form>
-
-      <div style="height:14px"></div>
-
-      <form method="post" action="/summaries/update">
-        <label class="small">Update AI summaries</label>
-        <div style="height:10px"></div>
-        <button class="btn ghost" type="submit">Generate summaries</button>
+        <button class="btn" type="submit">Ingest</button>
       </form>
 
       <div style="height:12px"></div>
@@ -45,25 +34,39 @@
     </div>
 
     <div class="card">
-      <b>Categories</b>
+      <b>Your topics</b>
+      {% if user_topics %}
+        <div class="topic-grid">
+          {% for topic in user_topics %}
+            <a class="topic-pill" href="/dashboard?category={{ topic }}">{{ topic }}</a>
+          {% endfor %}
+        </div>
+        <div style="height:16px"></div>
+      {% else %}
+        <p class="small">Pick topics to personalize your dashboard.</p>
+        <a class="btn ghost" href="/topics">Choose topics</a>
+        <div style="height:16px"></div>
+      {% endif %}
+
+      <b>Top conversations</b>
       <table class="table">
         <tr><th>Category</th><th>Top Conversations</th></tr>
         {% for c in categories %}
           <tr>
-            <td><a href="/dashboard?category={{ c.name }}">{{ c.name }}</a><div class="small">{{ c.count }} posts</div></td>
-            <td class="small">{{ c.summary or "—" }}</td>
-          </tr>
-        {% endfor %}
-      </table>
-
-      <div style="height:16px"></div>
-      <b>Top posts{% if selected_category %} in {{ selected_category }}{% endif %}</b>
-      <table class="table">
-        {% for p in posts %}
-          <tr>
-            <td>
-              <a href="{{ p.url }}" target="_blank">{{ p.title }}</a>
-              <div class="small">{{ p.source }} • heat {{ "%.2f"|format(p.heat_score) }}</div>
+            <td><a href="/dashboard?category={{ c.name }}">{{ c.name }}</a><div class="small">hot topic</div></td>
+            <td class="small">
+              {% if c.conversations %}
+                {% for convo in c.conversations %}
+                  <div style="margin-bottom:14px">
+                    <div>{{ convo.summary }}</div>
+                    <div style="margin-top:6px">
+                      <a class="btn ghost" href="{{ convo.url }}" target="_blank">See the conversation</a>
+                    </div>
+                  </div>
+                {% endfor %}
+              {% else %}
+                —
+              {% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -71,4 +74,3 @@
     </div>
   </div>
 {% endblock %}
-

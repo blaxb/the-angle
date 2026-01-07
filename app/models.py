@@ -37,3 +37,17 @@ class CategorySummary(SQLModel, table=True):
     summary: str
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+class ConversationSummary(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    category: str = Field(index=True)
+    post_url: str
+    summary: str
+    position: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserTopic(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True, foreign_key="user.id")
+    topic: str = Field(index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
