@@ -1,5 +1,6 @@
 # app/main.py
 import time
+from urllib.parse import quote_plus
 from datetime import datetime
 
 import httpx
@@ -184,6 +185,8 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
     # Summaries
     summaries = {s.category: s.summary for s in session.exec(select(CategorySummary)).all()}
     categories = [{"name": k, "count": v, "summary": summaries.get(k)} for k, v in ranked]
+    if category:
+        categories = [c for c in categories if c["name"] == category]
 
     if category:
         q = select(Post).where(Post.category == category).order_by(Post.heat_score.desc()).limit(40)
