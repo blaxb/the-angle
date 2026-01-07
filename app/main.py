@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from sqlalchemy import delete, text
 
 from .db import init_db, get_session, engine
-from .models import User, Post, CategorySummary, ConversationSummary
+from .models import User, Post, CategorySummary, ConversationSummary, UserTopic
 from .auth import (
     hash_password,
     verify_password,
@@ -33,6 +33,150 @@ templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 LAST_TOPICS_COOKIE = "last_topics"
+TOPIC_CHOICES = [
+    "ai",
+    "art",
+    "books",
+    "business",
+    "careers",
+    "climate",
+    "coding",
+    "cooking",
+    "crypto",
+    "culture",
+    "design",
+    "economics",
+    "education",
+    "energy",
+    "entrepreneurship",
+    "fashion",
+    "finance",
+    "fitness",
+    "food",
+    "gaming",
+    "health",
+    "history",
+    "investing",
+    "law",
+    "marketing",
+    "medicine",
+    "movies",
+    "music",
+    "parenting",
+    "personal finance",
+    "philosophy",
+    "photography",
+    "politics",
+    "productivity",
+    "real estate",
+    "relationships",
+    "science",
+    "sports",
+    "startups",
+    "sustainability",
+    "technology",
+    "travel",
+    "venture capital",
+    "wellness",
+    "world news",
+    "youth culture",
+    "cars",
+    "space",
+    "cybersecurity",
+    "data science",
+    "robotics",
+    "blockchain",
+    "economy",
+    "leadership",
+    "remote work",
+    "ecommerce",
+    "ux",
+    "architecture",
+    "biology",
+    "chemistry",
+    "physics",
+    "psychology",
+    "sociology",
+    "podcasts",
+    "startups funding",
+    "strategy",
+    "fundraising",
+    "management",
+    "sales",
+    "security",
+    "privacy",
+    "hardware",
+    "mobile",
+    "cloud",
+    "devops",
+    "open source",
+    "artificial intelligence",
+    "machine learning",
+    "product management",
+    "fintech",
+    "banking",
+    "insurance",
+    "retail",
+    "supply chain",
+    "logistics",
+    "manufacturing",
+    "energy transition",
+    "renewables",
+    "agriculture",
+    "environment",
+    "nonprofits",
+    "global affairs",
+    "geopolitics",
+    "econometric",
+    "public policy",
+    "journalism",
+    "media",
+    "social media",
+    "culture wars",
+    "space exploration",
+    "astronomy",
+    "mathematics",
+    "linguistics",
+    "language learning",
+    "career switching",
+    "investor relations",
+    "board governance",
+    "corporate strategy",
+    "consumer tech",
+    "enterprise tech",
+    "biotech",
+    "pharma",
+    "mental health",
+    "nutrition",
+    "restaurants",
+    "recipes",
+    "home improvement",
+    "interior design",
+    "gardening",
+    "outdoors",
+    "camping",
+    "hiking",
+    "running",
+    "cycling",
+    "soccer",
+    "basketball",
+    "baseball",
+    "football",
+    "tennis",
+    "golf",
+    "esports",
+    "board games",
+    "comics",
+    "anime",
+    "education policy",
+    "student life",
+    "hr",
+    "recruiting",
+    "legal tech",
+    "climate tech",
+    "robotics startups",
+    "quant finance",
+]
 
 
 def compute_heat(score: int, comments: int, created_utc: int) -> float:
@@ -117,7 +261,7 @@ def register(
     session.commit()
     session.refresh(u)
 
-    resp = RedirectResponse("/dashboard", status_code=302)
+    resp = RedirectResponse("/topics", status_code=302)
     resp.set_cookie(
         COOKIE_NAME,
         make_session_token(u.id),
@@ -138,6 +282,45 @@ def login_page(request: Request, session: Session = Depends(get_session)):
     return render(request, "login.html", {"user": user, "error": error})
 
 
+@app.get("/topics", response_class=HTMLResponse)
+def topics_page(request: Request, session: Session = Depends(get_session)):
+    user = get_current_user(request, session)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+    selected = {
+        row.topic
+        for row in session.exec(select(UserTopic).where(UserTopic.user_id == user.id)).all()
+    }
+    return render(
+        request,
+        "topics.html",
+        {
+            "user": user,
+            "topics": TOPIC_CHOICES,
+            "selected_topics": selected,
+        },
+    )
+
+
+@app.post("/topics")
+def topics_update(
+    request: Request,
+    topics: list[str] = Form(default=[]),
+    session: Session = Depends(get_session),
+):
+    user = get_current_user(request, session)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+
+    normalized = [t.strip().lower() for t in topics if t.strip()]
+    session.exec(delete(UserTopic).where(UserTopic.user_id == user.id))
+    for topic in normalized:
+        session.add(UserTopic(user_id=user.id, topic=topic))
+    session.commit()
+
+    return RedirectResponse("/dashboard", status_code=302)
+
+
 @app.post("/login")
 def login(
     request: Request,
@@ -151,7 +334,8 @@ def login(
     if not u or not verify_password(password, u.password_hash):
         return RedirectResponse("/login?err=1", status_code=302)
 
-    resp = RedirectResponse("/dashboard", status_code=302)
+    has_topics = session.exec(select(UserTopic).where(UserTopic.user_id == u.id)).first()
+    resp = RedirectResponse("/topics" if not has_topics else "/dashboard", status_code=302)
     resp.set_cookie(
         COOKIE_NAME,
         make_session_token(u.id),
@@ -176,6 +360,11 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
     user = get_current_user(request, session)
     if not user:
         return RedirectResponse("/login", status_code=302)
+
+    user_topics = [
+        row.topic
+        for row in session.exec(select(UserTopic).where(UserTopic.user_id == user.id)).all()
+    ]
 
     # Category counts
     cats = session.exec(select(Post.category)).all()
@@ -205,20 +394,18 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
         )
     if category:
         categories = [c for c in categories if c["name"] == category]
-    else:
-        cookie_topics = request.cookies.get(LAST_TOPICS_COOKIE, "")
-        requested = [t.strip() for t in cookie_topics.split(",") if t.strip()]
-        if requested:
-            categories = [c for c in categories if c["name"] in requested]
+    elif user_topics:
+        categories = [c for c in categories if c["name"] in user_topics]
 
     return render(
         request,
         "dashboard.html",
         {
             "user": user,
-            "categories": categories[:40],
+            "categories": categories,
             "selected_category": category,
             "msg": request.query_params.get("msg"),
+            "user_topics": user_topics,
         },
     )
 
@@ -398,6 +585,16 @@ async def ingest_all(
         max_age=MAX_AGE_SECONDS,
         path="/",
     )
+
+    existing_topics = {
+        row.topic
+        for row in session.exec(select(UserTopic).where(UserTopic.user_id == user.id)).all()
+    }
+    for topic in [t.lower() for t in topic_list]:
+        if topic not in existing_topics:
+            session.add(UserTopic(user_id=user.id, topic=topic))
+    session.commit()
+
     return resp
 
 

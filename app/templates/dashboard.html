@@ -3,14 +3,6 @@
   <h1 class="h1">Dashboard</h1>
   <p class="sub">Hot conversations, organized into categories.</p>
 
-  {% if not user.is_active_subscriber %}
-    <div class="card" style="margin-bottom:16px">
-      <b>Upgrade to unlock:</b> X ingestion, AI summaries, and higher limits.
-      <div style="height:10px"></div>
-      <a class="btn" href="/billing/checkout">Upgrade</a>
-    </div>
-  {% endif %}
-
   <div class="grid">
     <div class="card">
       <b>Ingest</b>
@@ -18,17 +10,9 @@
 
       <form method="post" action="/ingest/all">
         <label class="small">Topics (comma separated)</label>
-        <input class="input" name="topics" value="food, nutrition, recipes" />
+        <input class="input" name="topics" placeholder="finance, politics, cooking" />
         <div style="height:10px"></div>
         <button class="btn" type="submit">Ingest</button>
-      </form>
-
-      <div style="height:14px"></div>
-
-      <form method="post" action="/summaries/update">
-        <label class="small">Update AI summaries</label>
-        <div style="height:10px"></div>
-        <button class="btn ghost" type="submit">Generate summaries</button>
       </form>
 
       <div style="height:12px"></div>
@@ -36,7 +20,21 @@
     </div>
 
     <div class="card">
-      <b>Categories</b>
+      <b>Your topics</b>
+      {% if user_topics %}
+        <div class="topic-grid">
+          {% for topic in user_topics %}
+            <a class="topic-pill" href="/dashboard?category={{ topic }}">{{ topic }}</a>
+          {% endfor %}
+        </div>
+        <div style="height:16px"></div>
+      {% else %}
+        <p class="small">Pick topics to personalize your dashboard.</p>
+        <a class="btn ghost" href="/topics">Choose topics</a>
+        <div style="height:16px"></div>
+      {% endif %}
+
+      <b>Top conversations</b>
       <table class="table">
         <tr><th>Category</th><th>Top Conversations</th></tr>
         {% for c in categories %}
