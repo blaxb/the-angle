@@ -1,6 +1,5 @@
 # app/main.py
 import time
-import asyncio
 from urllib.parse import quote_plus
 from datetime import datetime
 
@@ -34,7 +33,7 @@ templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 LAST_TOPICS_COOKIE = "last_topics"
-MAX_COMMENTED_CONVERSATIONS = 15
+MAX_CONVERSATIONS_PER_TOPIC = 15
 TOPIC_CHOICES = [
     "ai",
     "art",
@@ -402,6 +401,16 @@ def dashboard(request: Request, category: str | None = None, session: Session = 
             key=lambda topic: (-ranked_map.get(topic, 0), topic),
         )[:6]
 
+    # Summaries
+    categories = []
+    for k, v in ranked:
+        categories.append(
+            {
+                "name": k,
+                "count": v,
+                "conversations": conversation_map.get(k, []),
+            }
+        )
     if category:
         categories = [c for c in categories if c["name"] == category]
     elif user_topics:
@@ -441,11 +450,10 @@ async def ingest_all(
     inserted_x = 0
     x_status = None
 
-    # Refresh only the ingested topics so other user topics remain available on the dashboard
-    topic_categories = [topic.lower() for topic in topic_list]
-    session.exec(delete(CategorySummary).where(CategorySummary.category.in_(topic_categories)))
-    session.exec(delete(ConversationSummary).where(ConversationSummary.category.in_(topic_categories)))
-    session.exec(delete(Post).where(Post.category.in_(topic_categories)))
+    # Reset previous ingest results so categories match requested topics
+    session.exec(delete(CategorySummary))
+    session.exec(delete(ConversationSummary))
+    session.exec(delete(Post))
     session.commit()
 
     x_category = topic_list[0].lower() if len(topic_list) == 1 else "mixed"
@@ -574,14 +582,10 @@ async def ingest_all(
             select(Post)
             .where(Post.category == cat, Post.source == "reddit")
             .order_by(Post.heat_score.desc())
+            .limit(MAX_CONVERSATIONS_PER_TOPIC)
         ).all()
-        primary_posts = top_posts[:MAX_COMMENTED_CONVERSATIONS]
-        overflow_posts = top_posts[MAX_COMMENTED_CONVERSATIONS:]
-        comment_tasks = [fetch_reddit_comments(post.source_id, limit=6) for post in primary_posts]
-        comment_results = await asyncio.gather(*comment_tasks, return_exceptions=True)
-        for idx, (post, comments) in enumerate(zip(primary_posts, comment_results)):
-            if isinstance(comments, Exception):
-                comments = []
+        for idx, post in enumerate(top_posts):
+            comments = await fetch_reddit_comments(post.source_id, limit=6)
             summary = summarize_post(post.title, comments)
             session.add(
                 ConversationSummary(
@@ -589,17 +593,6 @@ async def ingest_all(
                     post_url=post.url,
                     summary=summary,
                     position=idx,
-                )
-            )
-        start_idx = len(primary_posts)
-        for offset, post in enumerate(overflow_posts):
-            summary = post.title
-            session.add(
-                ConversationSummary(
-                    category=cat,
-                    post_url=post.url,
-                    summary=summary,
-                    position=start_idx + offset,
                 )
             )
     session.commit()
